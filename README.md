@@ -55,7 +55,7 @@ Omarchy menu.
 
 ```bash
 # 1. Clone as a user plugin (folder name must match manifest id)
-git clone <repo-url> ~/.config/omarchy/plugins/oma.wheel
+git clone https://github.com/Compourri/OmaWheel ~/.config/omarchy/plugins/oma.wheel
 
 # 2. Rescan + enable
 omarchy-shell shell rescanPlugins
