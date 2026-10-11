@@ -213,13 +213,6 @@ and writes to your **user** file only
   keys (`provider`, `target`, `aliases`, `iconFont`, guards…) through, so
   renaming an entry can't silently kill its provider or alias routes.
 
-## Roadmap
-
-- [ ] v0.1 polish: empty-state art, long-label wrapping, >12-wedge density
-- [ ] Hold-to-summon / flick-select (Far Cry slow-mo feel) — skipped by request
-- [ ] Dual-ring variant (inner categories + outer actions)
-- [ ] preview.png: capture a real screenshot (README already embeds it)
-
 ## License
 
 MIT
