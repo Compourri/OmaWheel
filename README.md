@@ -51,6 +51,12 @@ Omarchy menu.
 - Omarchy with its Quickshell shell (`omarchy-shell`)
 - Hyprland (summon via shell IPC + keybind)
 
+External dependencies (all stock on Omarchy, no network, no sudo, no
+background services): `bash`, `python3` (stdlib only), `gtk-launch` (app
+launching, via `uwsm-app`), `gsettings` (icon theme detection),
+`powerprofilesctl` plus the `omarchy-font-*` / `omarchy-powerprofiles-*`
+helpers (fonts and power-profiles providers).
+
 ## Install
 
 ```bash
@@ -66,6 +72,21 @@ omarchy plugin validate ~/.config/omarchy/plugins/oma.wheel
 
 # 3. Restart the shell so the new plugin code loads, then summon it
 omarchy restart shell
+```
+
+## Remove
+
+```bash
+omarchy plugin disable oma.wheel
+omarchy plugin remove oma.wheel --yes
+omarchy-shell shell rescanPlugins
+```
+
+Optional leftovers cleanup (the wheel's own recents store, your keybind):
+
+```bash
+rm -f ~/.local/state/omarchy/omawheel-recents.json
+# and drop the SUPER + Z binding from ~/.config/hypr/bindings.lua
 ```
 
 Developing locally? Clone anywhere and link it instead:
