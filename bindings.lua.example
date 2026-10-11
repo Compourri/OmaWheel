@@ -1,0 +1,14 @@
+-- OmaWheel keybind snippet for ~/.config/hypr/bindings.lua
+-- Check for conflicts first: `omarchy menu keybindings --print`
+-- SUPER + Z and SUPER + middle mouse (mouse:274) are both available.
+
+o.bind("SUPER + Z", "OmaWheel", "omarchy-shell shell toggle oma.wheel '{\"menu\":\"root\"}'")
+o.bind("SUPER + mouse:274", "OmaWheel", "omarchy-shell shell toggle oma.wheel '{\"menu\":\"root\"}'")
+
+-- Optional deep-links (pick what you want):
+-- o.bind("SUPER + SHIFT + Z", "OmaWheel: system", "omarchy-shell shell summon oma.wheel '{\"menu\":\"system\"}'")
+-- o.bind("SUPER + ALT + Z", "OmaWheel: style", "omarchy-shell shell summon oma.wheel '{\"menu\":\"style\"}'")
+
+-- Wheel editor (add/rename/hide entries in your user menu file).
+-- Pick a binding that is free on your system first.
+-- o.bind("SUPER + SHIFT + E", "OmaWheel editor", "omarchy-shell shell summon oma.wheel '{\"edit\":true}'")
