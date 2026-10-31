@@ -2,15 +2,17 @@
 
 Weapon-wheel style radial menu for [Omarchy](https://omarchy.org), built as a
 native Quickshell shell plugin — in the spirit of FPS weapon wheels (Far Cry /
-Red Dead Redemption) but theme-conscious and auto-populated just like the
-Omarchy menu.
+Red Dead Redemption / Witcher 3) but theme-conscious and auto-populated just
+like the Omarchy menu.
 
-![status](https://img.shields.io/badge/status-v0.1%20beta-blue)
+![status](https://img.shields.io/badge/status-v0.2%20beta-blue)
 
 ![OmaWheel](preview.png)
 
 ## What it is
 
+- **Multiple Wheel Design Styles (RDR2 & Witcher 3).** Choose your aesthetic preference — classic segmented Red Dead Redemption 2 pie style or Witcher 3 hexagonal medallion nodes style.
+- **Wheel Design Editor Toggle.** Switch styles directly from the built-in wheel editor or via user settings (`~/.config/omarchy/extensions/omarchy-menu.jsonc` under `settings.wheelDesign`).
 - **One ring per level (RDR-style drill-in).** The root wheel shows the
   top-level Omarchy menu; clicking a wedge descends into its sub-wheel.
   The hub goes back one level (closes at root).
@@ -25,7 +27,7 @@ Omarchy menu.
   (`Color.menu.*`), geometry/typography from `Style.*` tokens, borders via
   `Border.surfaceSpec("menu", …)`. Switching Omarchy themes restyles the
   wheel with no plugin changes.
-- **Point + click (v0.1).** Hover highlights a wedge, click activates.
+- **Point + click.** Hover highlights a wedge, click activates.
   Arrows + Enter / Space as keyboard fallback; `Esc` backs out / closes.
 - **Type-to-filter search.** Typing dims non-matching wedges, snaps hover
   to the best ring match, and shows the global (deep) best match in the hub
@@ -42,8 +44,8 @@ Omarchy menu.
 - **Custom image icons.** Any `icon` that looks like a path (absolute,
   `~`, `file://`, `image://`) renders as an image instead of a glyph —
   in your `omarchy-menu.jsonc` user entries as well as app icons.
-- **Wheel editor.** Summon with `{"edit":true}` to add, rename, re-icon,
-  hide, or delete entries in your *user* menu file — stock entries become
+- **Wheel editor.** Summon with `{"edit":true}` (or right-click the wheel) to add, rename, re-icon,
+  hide, delete entries, or switch wheel designs in your *user* menu file — stock entries become
   per-key overrides, never touching the defaults.
 
 ## Requirements
@@ -123,6 +125,9 @@ Custom image icon in your user file
 
 ```jsonc
 {
+  "settings": {
+    "wheelDesign": "witcher3" // or "rdr2"
+  },
   "trigger.terminal": {
     "icon": "~/.config/omarchy/icons/term.png",
     "label": "Terminal",
@@ -167,7 +172,7 @@ menu: absolute paths direct, then a bash-scanned name → file index
 (verbatim port of the stock `AppLibrary` scan — covers icons Qt's themed
 lookup misses — plus a `-bin` suffixed fallback for repackaged binaries
 whose desktop `Icon` drops the suffix), then `Quickshell.iconPath`. One
-deliberate divergence inside the index: large author PNGs (≥256px) win
+divergence inside the index: large author PNGs (≥256px) win
 over SVGs, because QtSvg mangles some detailed SVGs into blobs
 (PdfCraft's lion loses all dark detail and its clip-path) while the
 shipped raster is correct. Stock-hidden apps stay hidden:
@@ -215,30 +220,5 @@ No hardcoded palette values in `Menu.qml` — grep should find none.
 
 ## Wheel editor
 
-Summon with `omarchy-shell shell summon oma.wheel '{"edit":true}'` (see
-`bindings.lua.example` for a keybind). The editor browses the merged menu
-and writes to your **user** file only
-(`~/.config/omarchy/extensions/omarchy-menu.jsonc`):
-
-- **Add item here** — new submenu or action under the browsed menu.
-  Ids derive from the label (`parent.slug`) and stay unique.
-- **Edit** — rename / re-icon anything. Stock entries become minimal
-  per-key overrides (only the keys you change); custom entries edit freely.
-- **Delete** — removes custom entries with their whole subtree.
-- **Hide / Unhide** — stock entries hide via a `when: "false"` override
-  (other custom keys preserved); unhiding drops just the override.
-- **Clear** — the generated `Recent` row offers Clear to empty the global
-  recents (the wedge hides itself until the next launch).
-- Rows are badged `stock` / `custom` / `hidden` / `auto` (provider rows
-  like app categories can't be edited). Saves apply live through the
-  existing file watcher.
-- **Saves are surgical.** The editor patches single entry spans in the
-  file text instead of rewriting it, so hand-written comments, formatting,
-  and other tools' marker blocks (e.g. shibumi's routing comments) in
-  your user file survive untouched. Stock overrides also pass unmanaged
-  keys (`provider`, `target`, `aliases`, `iconFont`, guards…) through, so
-  renaming an entry can't silently kill its provider or alias routes.
-
-## License
-
-MIT
+Summon with `omarchy-shell shell summon oma.wheel '{"edit":true}'` (or right-click the wheel). The editor browses the merged menu
+and writes to your **user** file only (`~/.config/omarchy/extensions/omarchy-menu.jsonc`), preserving defaults. Stock items edited or hidden record overrides/guards (`when: false`), while custom items created in the editor can be edited or deleted. You can also switch wheel designs directly from the editor footer.
