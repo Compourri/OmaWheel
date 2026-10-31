@@ -1280,6 +1280,14 @@ Item {
     root.appInfoById = next
   }
 
+  function writeRecents(content) {
+    try {
+      Util.execDetached("python3 -c " + Util.shellQuote("import os; path = os.path.expanduser('~/.local/state/omarchy/omawheel-recents.json'); os.makedirs(os.path.dirname(path), exist_ok=True); open(path, 'w', encoding='utf-8').write(" + JSON.stringify(content) + "); os.chmod(path, 0o600)"))
+    } catch (e) {
+      try { recentsFile.setText(content) } catch (e2) {}
+    }
+  }
+
   function recordRecent(kind, id) {
     var key = String(id || "")
     if (!kind || !key) return
@@ -1290,9 +1298,7 @@ Item {
       list.push({ k: e.k === "action" ? "action" : "app", id: String(e.id) })
     }
     root.recentEntries = list
-    try {
-      recentsFile.setText(JSON.stringify(list))
-    } catch (e2) {}
+    root.writeRecents(JSON.stringify(list))
     if (root.rowsLoaded) root.rebuildRecentRows()
   }
 
@@ -1300,9 +1306,7 @@ Item {
   // hides itself once its rows rebuild to nothing.
   function clearRecent() {
     root.recentEntries = []
-    try {
-      recentsFile.setText("[]")
-    } catch (e) {}
+    root.writeRecents("[]")
     if (root.rowsLoaded) root.rebuildRecentRows()
   }
 
