@@ -6,9 +6,17 @@
   "author": "Compourri",
   "license": "MIT",
   "description": "Weapon-wheel style radial menu for Omarchy. Auto-populates from omarchy-menu.jsonc like the built-in menu.",
-  "keywords": ["menu", "radial", "wheel", "weapon-wheel", "quickshell"],
-  "kinds": ["menu"],
-  "keepLoaded": false,
+  "keywords": [
+    "menu",
+    "radial",
+    "wheel",
+    "weapon-wheel",
+    "quickshell"
+  ],
+  "kinds": [
+    "menu"
+  ],
+  "keepLoaded": true,
   "entryPoints": {
     "menu": "Menu.qml"
   }

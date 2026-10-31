@@ -130,6 +130,8 @@ Item {
   property int hoveredIndex: -1
   property int wheelSerial: 0
   property var currentRows: []
+  // Wheel design style: "rdr2" (default segmented pie) or "witcher3" (hexagonal medallion nodes).
+  property string wheelDesign: "rdr2"
   // Type-to-filter: dim non-matches, snap hover to the best ring match,
   // show the global (deep) best match in the hub for Enter-to-launch.
   property string filterText: ""
@@ -144,6 +146,9 @@ Item {
   // and pops its icon; shockT drives the expanding launch shockwave.
   property int pressedIndex: -1
   property real shockT: 0
+  // Menu-change transition driver (0→1). Geometry + hub read it for an
+  // island-style settle on drill-in / back / fresh open (see menuAnim).
+  property real menuT: 1
   // ---- wheel editor (edits the USER extension file only, never defaults) ----
   property bool editorOpen: false
   property bool editorPending: false
@@ -266,7 +271,16 @@ Item {
     if (!root.item(id)) {
       if (id !== "root") {
         root.pendingProviderRoute = String(initialMenu || "")
-        root.loadAncestorProviders(root.pendingProviderRoute)
+        var kicked = root.loadAncestorProviders(root.pendingProviderRoute)
+        // The kick above can complete synchronously (DesktopEntries path):
+        // enumeration merges rows and the nested retry opens the target
+        // before this call resumes. Consumed pending proves it — returning
+        // early so the lines below don't clobber the target with root.
+        if (!root.pendingProviderRoute) return "ok"
+        // Nothing kicked (no unloaded provider on the path): clear the
+        // pending retry, otherwise every later merge re-roots the wheel
+        // chasing an id that will never exist.
+        if (!kicked) root.pendingProviderRoute = ""
       }
       id = "root"
     }
@@ -277,15 +291,21 @@ Item {
 
   // Kick off enumeration for static provider menus on the path to an
   // unresolved deep link (e.g. "apps" for "apps.graphics"), so the merge
-  // that creates the target actually happens.
+  // that creates the target actually happens. Returns whether anything was
+  // kicked; the caller clears a pending retry nobody is working to fulfill.
   function loadAncestorProviders(route) {
+    var started = false
     var parts = String(route || "").split(".")
     var prefix = ""
     for (var i = 0; i < parts.length - 1; i++) {
       prefix = prefix ? prefix + "." + parts[i] : parts[i]
       var entry = root.item(prefix)
-      if (entry && entry.provider && !root.providersLoaded[prefix]) root.loadProviderForMenu(prefix)
+      if (entry && entry.provider && !root.providersLoaded[prefix]) {
+        root.loadProviderForMenu(prefix)
+        started = true
+      }
     }
+    return started
   }
 
   function retryPendingProviderRoute() {
@@ -321,12 +341,18 @@ Item {
     root.loadProviderForMenu(id)
     if (root.appLibrary) root.appLibrary.refreshIcons()
     root.wheelSerial++
+    // Snap back so the morph is always visible (restarting an animation
+    // already at its target would render nothing).
+    root.menuT = 0
+    menuAnim.restart()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
   function cancel() {
     root.opened = false
     exitAnim.stop()
+    menuAnim.stop()
+    root.menuT = 1
     pressTimer.stop()
     wheelHolder.scale = 1
     wheelHolder.opacity = 1
@@ -360,6 +386,9 @@ Item {
     root.invalidateVolatileProvider(id)
     root.loadProviderForMenu(id)
     root.wheelSerial++
+    // Snap back so the morph is always visible (see openExistingMenu).
+    root.menuT = 0
+    menuAnim.restart()
   }
 
   function goBack() {
@@ -679,7 +708,14 @@ Item {
     var dids = ({})
     for (var d = 0; d < root.defaultMenuItems.length; d++) dids[root.defaultMenuItems[d].id] = true
     root.defaultIds = dids
-    var merged = WheelModel.mergeMenuSources(root.defaultMenuItems, root.userMenuItems)
+    // Island rewrites the shared user file so stock entries (apps, system,
+    // theme, ...) launch the island instead. Ignore those overrides here so
+    // the Apps wedge keeps drilling into provider categories; the file is
+    // untouched so the stock menu keeps island's behavior.
+    var cleanUser = WheelModel.scrubIslandHijacks(root.defaultMenuItems, root.userMenuItems)
+    if (cleanUser.length !== root.userMenuItems.length)
+      root.traceEvent("scrubbed " + (root.userMenuItems.length - cleanUser.length) + " island hijack(s)")
+    var merged = WheelModel.mergeMenuSources(root.defaultMenuItems, cleanUser)
     root.providerRevision += 1
     root.providersLoaded = ({})
     root.providerQueue = []
@@ -1065,6 +1101,27 @@ Item {
     if (entry.icon) return entry.icon
     return root.defaultIconFor(entry.id) || "•"
   }
+  // Font twin of the icon fallback above: a stock glyph must render in the
+  // stock font, not the override's (possibly empty) one — otherwise a
+  // partial user override shows tofu instead of the stock mark.
+  function defaultFontFor(id) {
+    for (var i = 0; i < root.defaultMenuItems.length; i++) {
+      var e = root.defaultMenuItems[i]
+      if (e && e.id === id) return e.iconFont || ""
+    }
+    return ""
+  }
+  function glyphFontFor(entry) {
+    if (!entry) return ""
+    if (entry.icon) return entry.iconFont || ""
+    return root.defaultFontFor(entry.id)
+  }
+  // Ink-normalized glyph size: every wedge/hub glyph inks the same box as
+  // the image icons (see WheelModel.glyphPixelSize), so outline marks stop
+  // sprawling past full-bleed tiles.
+  function glyphPixelSizeFor(entry, box) {
+    return WheelModel.glyphPixelSize(root.glyphFor(entry), root.glyphFontFor(entry), box)
+  }
 
   // Custom image icons: any icon that looks like a path (absolute, ~,
   // file://, image://) renders as an image instead of a glyph. Works for
@@ -1083,12 +1140,14 @@ Item {
   // name to a wrong-context icon instead).
   property var iconIndex: ({})
   property var pendingIconIndex: ({})
+  property var pendingIconScore: ({})
   property bool iconIndexScanned: false
 
   function iconIndexScanCommand() {
     // List app/device icons across the XDG icon dirs and /usr/share/pixmaps
-    // as "<path>" lines. SVGs are emitted before PNGs so the parser, which
-    // keeps the first hit per name, prefers scalable icons.
+    // as "<path>" lines. SVGs are emitted before PNGs, but the parser
+    // (indexIconLine) scores every hit — large PNGs, theme precedence —
+    // rather than keeping the first, so emission order carries no weight.
     return [
       'dirs="$HOME/.icons $HOME/.local/share/icons";',
       'IFS=":"; for d in ${XDG_DATA_DIRS:-/usr/local/share:/usr/share}; do dirs="$dirs $d/icons"; done; unset IFS;',
@@ -1101,6 +1160,17 @@ Item {
     ].join(' ')
   }
 
+  function iconSizeOf(path) {
+    var m = /\/(\d+)x(\d+)\//.exec(String(path || ""))
+    if (!m) return 0
+    return Math.max(parseInt(m[1], 10) || 0, parseInt(m[2], 10) || 0)
+  }
+
+  function iconThemeOf(path) {
+    var m = /\/icons\/([^/]+)\//.exec(String(path || ""))
+    return m ? m[1] : ""
+  }
+
   function indexIconLine(path) {
     var value = String(path || "").trim()
     if (value.length === 0) return
@@ -1108,8 +1178,21 @@ Item {
     var file = slash >= 0 ? value.slice(slash + 1) : value
     var dot = file.lastIndexOf(".")
     var name = dot > 0 ? file.slice(0, dot) : file
-    if (name.length > 0 && root.pendingIconIndex[name] === undefined)
+    if (name.length === 0) return
+    var isSvg = /\.svg$/i.test(file)
+    var size = root.iconSizeOf(value)
+    // Prefer author-rendered rasters when big enough (>=256px): QtSvg
+    // mangles some detailed SVGs into blobs (PdfCraft's lion loses all
+    // dark detail and its clip-path), while the shipped 512px PNG is
+    // correct. Otherwise scalable wins, then the largest small raster.
+    // hicolor sorts last so a real theme's artwork keeps precedence.
+    var score = (root.iconThemeOf(value) === "hicolor" ? 0 : 1000000000)
+      + (!isSvg && size >= 256 ? 20000000 + size : (isSvg ? 10000000 : size))
+    var prev = root.pendingIconScore[name]
+    if (prev === undefined || score > prev) {
       root.pendingIconIndex[name] = value
+      root.pendingIconScore[name] = score
+    }
   }
 
   // One scan per summon is enough: the instance is short-lived
@@ -1118,6 +1201,19 @@ Item {
     if (!root.iconIndexScanned && !iconIndexScan.running) iconIndexScan.running = true
   }
 
+  // An exact index miss also tries the `-bin` suffixed name:
+  // repackaged binaries often ship `foo-bin.png` while the desktop file
+  // declares `Icon=foo` (freedownloadmanager).
+  // SVGs must rasterize large: QtSvg drops hairline detail (and honors
+  // less of the spec — e.g. clipPath) when rastered at display size, so a
+  // detailed mark like PdfCraft's lion arrives as a blank blob. A 512px
+  // raster downscaled by the scene keeps the detail (verified against a
+  // reference 55px raster, which preserves it). PNGs keep display-size
+  // raster (their bytes are already final; upscaling would only blur).
+  function svgSource(url) {
+    var value = String(url || "").toLowerCase()
+    return value.indexOf("file://") === 0 && value.indexOf(".svg") === value.length - 4
+  }
   function iconSourceFor(icon) {
     var value = String(icon || "")
     if (root.appLibrary) return root.appLibrary.iconSource(value)
@@ -1125,7 +1221,7 @@ Item {
     if (value.indexOf("file://") === 0 || value.indexOf("image://") === 0) return value
     if (value.charAt(0) === "~") return Util.fileUrl(root.homeDir + value.slice(1))
     if (value.charAt(0) === "/") return Util.fileUrl(value)
-    var indexed = root.iconIndex[value]
+    var indexed = root.iconIndex[value] || root.iconIndex[value + "-bin"]
     if (indexed) return Util.fileUrl(indexed)
     var themed = Quickshell.iconPath(value, true)
     if (themed && themed.length > 0) return themed
@@ -1247,12 +1343,36 @@ Item {
     root.itemOrder = order
   }
 
+  // Recent app duplicates resolve through appInfoById, which only exists
+  // after the Apps enumeration lands. Apps is lazily enumerated on first
+  // open of the Apps wedge, so without help Recent would stay empty until
+  // the user opens Apps first. Kick off that enumeration whenever a recent
+  // app id has no cached info; the enumeration's merge calls back into
+  // rebuildRecentRows, so the rows fill in on their own.
+  function ensureAppsForRecent() {
+    if (!root.rowsLoaded) return
+    var need = false
+    for (var i = 0; i < root.recentEntries.length; i++) {
+      var e = root.recentEntries[i]
+      if (!e || !e.id) continue
+      if (e.k === "app" && !root.appInfoById[e.id]) { need = true; break }
+    }
+    if (!need) return
+    if (!root.item("apps") || root.providersLoaded["apps"]) return
+    if (providerProc.running) {
+      if (root.providerQueue.indexOf("apps") < 0) root.providerQueue = root.providerQueue.concat(["apps"])
+      return
+    }
+    root.startProviderForMenu("apps")
+  }
+
   // Rebuild the children of the global Recent menu from recentEntries, most
   // recent first. Unresolvable entries (uninstalled apps, removed or hidden
   // menu items) are skipped; launching a duplicate re-records its origin.
   function rebuildRecentRows() {
     if (!root.rowsLoaded) return
     root.ensureRecentMenu()
+    root.ensureAppsForRecent()
     var rows = []
     var taken = ({})
     for (var i = 0; i < root.recentEntries.length; i++) {
@@ -1709,6 +1829,27 @@ Item {
   function applyUserFileOps(ops) {
     var text = ""
     try { text = String(userMenuFile.text() || "") } catch (e) { text = "" }
+    for (var i = 0; i < ops.length; i++) {
+      if (ops[i].t === "set-design") {
+        var des = ops[i].value
+        if (!text.trim()) {
+          var fresh = { settings: { wheelDesign: des } }
+          try { userMenuFile.setText(JSON.stringify(fresh, null, 2) + "\n") } catch (e2) {}
+          return
+        }
+        // Try inserting or replacing wheelDesign in top-level settings object
+        if (text.indexOf("settings") >= 0) {
+          text = text.replace(/"wheelDesign"\s*:\s*"[^"]*"/, '"wheelDesign": "' + des + '"')
+          if (text.indexOf("wheelDesign") < 0) {
+            text = text.replace(/"settings"\s*:\s*\{/, '{\n    "settings": {\n      "wheelDesign": "' + des + '",')
+          }
+        } else {
+          text = text.replace(/\{/, '{\n  "settings": {\n    "wheelDesign": "' + des + '"\n  },')
+        }
+        try { userMenuFile.setText(text) } catch (e3) {}
+        return
+      }
+    }
     if (!text.trim()) {
       // No file yet: build a fresh flat object from set-ops.
       var fresh = {}
@@ -1798,6 +1939,7 @@ Item {
   }
 
   function loadProviderForMenu(id) {
+    if (id === "recent") { root.ensureAppsForRecent(); return }
     var entry = root.item(id)
     if (!entry || !entry.provider || root.providersLoaded[id]) return
     if (entry.provider === "apps") { root.startProviderForMenu(id); return }
@@ -1843,7 +1985,7 @@ Item {
     id: iconIndexScan
     command: ["bash", "-c", root.iconIndexScanCommand()]
     stdout: SplitParser { onRead: function(line) { root.indexIconLine(line) } }
-    onStarted: root.pendingIconIndex = ({})
+    onStarted: { root.pendingIconIndex = ({}); root.pendingIconScore = ({}) }
     // Swapping the property re-evaluates every iconSourceFor() binding, so
     // newly found icons pop in without rebuilding the rows.
     onExited: {
@@ -1929,7 +2071,21 @@ Item {
     path: root.userMenuPath
     watchChanges: true
     printErrors: false
-    onLoaded: { root.userMenuItems = root.parseMenuJsonc(text()); root.userRawItems = root.parseRawMenuJsonc(text()); root.userReported = true; root.rebuildItemsFromSources() }
+    onLoaded: {
+      var parsed = root.parseMenuJsonc(text())
+      root.userMenuItems = parsed
+      root.userRawItems = root.parseRawMenuJsonc(text())
+      // Check top-level settings for wheelDesign
+      try {
+        var str = WheelModel.stripJsonc(text())
+        var obj = JSON.parse(str)
+        if (obj && obj.settings && typeof obj.settings.wheelDesign === "string") {
+          root.wheelDesign = obj.settings.wheelDesign
+        }
+      } catch (e) {}
+      root.userReported = true
+      root.rebuildItemsFromSources()
+    }
     onLoadFailed: { root.userMenuItems = []; root.userRawItems = ({}); root.userReported = true; root.rebuildItemsFromSources() }
     onFileChanged: reload()
   }
@@ -2000,16 +2156,44 @@ Item {
         }
       }
 
-      // Static pie: data, filter, or theme only — never hover/press.
+      // Menu-change settle, island-style (guilhermerisu/island, MIT):
+      // geometry morphs with a soft landing while content fades in —
+      // island's morph curve [0.22,0.8,0.24,1], relaxed run so the ring
+      // blooms rather than snaps. Exaggerated vs island (bigger scale
+      // range) so the transition reads on a full ring.
+      NumberAnimation {
+        id: menuAnim
+        target: root
+        property: "menuT"
+        to: 1
+        duration: 420
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: [0.22, 0.8, 0.24, 1, 1, 1]
+      }
+
+      // Menu-change transition: ring sectors + icons morph and fade as one
+      // (island morphs width/height/corners together). Same-size container
+      // so wedge geometry and mouse math are untouched; the launch exit
+      // animation stays on wheelHolder and composes with this.
+      Item {
+        id: ringContent
+        anchors.fill: parent
+        transformOrigin: Item.Center
+        scale: 0.82 + 0.18 * root.menuT
+        // Floor keeps the snap frame from flashing fully invisible.
+        opacity: 0.25 + 0.75 * root.menuT
+
       Canvas {
         id: baseRing
         anchors.fill: parent
         property int serial: root.wheelSerial
         property color bg: root.background
         property color bd: root.border
+        property string design: root.wheelDesign
         onSerialChanged: requestPaint()
         onBgChanged: requestPaint()
         onBdChanged: requestPaint()
+        onDesignChanged: requestPaint()
         onWidthChanged: requestPaint()
         onHeightChanged: requestPaint()
         onPaint: {
@@ -2017,30 +2201,49 @@ Item {
           ctx.clearRect(0, 0, width, height)
           var cx = width / 2, cy = height / 2
           var n = root.currentRows.length
-          if (n === 0) {
+          if (root.wheelDesign === "witcher3") {
             ctx.beginPath()
             ctx.arc(cx, cy, root.wheelRadius, 0, Math.PI * 2)
-            // Semi-transparent so the compositor blurs the wallpaper
-            // through the wheel (frosted-glass ring + hub).
-            ctx.fillStyle = Util.alpha(root.background, 0.68)
-            ctx.fill()
-            return
-          }
-          for (var i = 0; i < n; i++) {
-            root.traceWedge(ctx, cx, cy, i, n)
-            // Unselected style always; the highlight layer overdraws the
-            // hovered/pressed wedge. Filtered-out wedges fade.
-            var dimmed = root.filterText.trim() && root.currentRows[i] && root.ringMatchMap[root.currentRows[i].id] !== true
-            ctx.fillStyle = Util.alpha(root.background, dimmed ? 0.35 : 0.68)
-            ctx.fill()
-            ctx.lineWidth = Math.max(1, Style.space(1))
             ctx.strokeStyle = root.border
+            ctx.lineWidth = Math.max(1, Style.space(2))
+            ctx.fillStyle = Util.alpha(root.background, 0.45)
+            ctx.fill()
             ctx.stroke()
+
+            for (var i = 0; i < n; i++) {
+              var rad = root.centerDeg(i) * Math.PI / 180
+              var mx = cx + Math.cos(rad) * root.iconRingR
+              var my = cy + Math.sin(rad) * root.iconRingR
+              ctx.beginPath()
+              ctx.arc(mx, my, root.iconBox * 0.55, 0, Math.PI * 2)
+              var dimmed = root.filterText.trim() && root.currentRows[i] && root.ringMatchMap[root.currentRows[i].id] !== true
+              ctx.fillStyle = Util.alpha(root.background, dimmed ? 0.3 : 0.85)
+              ctx.fill()
+              ctx.lineWidth = Math.max(1, Style.space(2))
+              ctx.strokeStyle = root.border
+              ctx.stroke()
+            }
+          } else {
+            if (n === 0) {
+              ctx.beginPath()
+              ctx.arc(cx, cy, root.wheelRadius, 0, Math.PI * 2)
+              ctx.fillStyle = Util.alpha(root.background, 0.68)
+              ctx.fill()
+              return
+            }
+            for (var i = 0; i < n; i++) {
+              root.traceWedge(ctx, cx, cy, i, n)
+              var dimmed = root.filterText.trim() && root.currentRows[i] && root.ringMatchMap[root.currentRows[i].id] !== true
+              ctx.fillStyle = Util.alpha(root.background, dimmed ? 0.35 : 0.68)
+              ctx.fill()
+              ctx.lineWidth = Math.max(1, Style.space(1))
+              ctx.strokeStyle = root.border
+              ctx.stroke()
+            }
           }
-          // Hub disc (slightly more solid than the ring for text legibility).
           ctx.beginPath()
           ctx.arc(cx, cy, root.hubRadius, 0, Math.PI * 2)
-          ctx.fillStyle = Util.alpha(root.background, 0.8)
+          ctx.fillStyle = Util.alpha(root.background, 0.85)
           ctx.fill()
           ctx.lineWidth = Math.max(1, Style.space(1))
           ctx.strokeStyle = root.border
@@ -2048,8 +2251,6 @@ Item {
         }
       }
 
-      // Highlight: hovered/pressed wedge only. Cheap to repaint on
-      // every hover — the base pie above never repaints for it.
       Canvas {
         id: glowRing
         anchors.fill: parent
@@ -2059,12 +2260,14 @@ Item {
         property color sel: root.selectionFill
         property color acc: root.accent
         property color bd: root.border
+        property string design: root.wheelDesign
         onSerialChanged: requestPaint()
         onHoverChanged: requestPaint()
         onPressChanged: requestPaint()
         onSelChanged: requestPaint()
         onAccChanged: requestPaint()
         onBdChanged: requestPaint()
+        onDesignChanged: requestPaint()
         onWidthChanged: requestPaint()
         onHeightChanged: requestPaint()
         onPaint: {
@@ -2073,25 +2276,52 @@ Item {
           var cx = width / 2, cy = height / 2
           var n = root.currentRows.length
           if (n === 0) return
-          // Pressed wedge: solid accent (the committed choice). Drawn
-          // first so a differing hover ring still reads on top.
-          var p = root.pressedIndex
-          if (p >= 0 && p < n) {
-            root.traceWedge(ctx, cx, cy, p, n)
-            ctx.fillStyle = root.accent
-            ctx.fill()
-            ctx.lineWidth = Math.max(1, Style.space(3))
-            ctx.strokeStyle = root.border
-            ctx.stroke()
-          }
-          var h = root.hoveredIndex
-          if (h >= 0 && h < n && h !== p) {
-            root.traceWedge(ctx, cx, cy, h, n)
-            ctx.fillStyle = root.selectionFill
-            ctx.fill()
-            ctx.lineWidth = Math.max(1, Style.space(2))
-            ctx.strokeStyle = root.border
-            ctx.stroke()
+          if (root.wheelDesign === "witcher3") {
+            var p = root.pressedIndex
+            if (p >= 0 && p < n) {
+              var rad = root.centerDeg(p) * Math.PI / 180
+              var mx = cx + Math.cos(rad) * root.iconRingR
+              var my = cy + Math.sin(rad) * root.iconRingR
+              ctx.beginPath()
+              ctx.arc(mx, my, root.iconBox * 0.55, 0, Math.PI * 2)
+              ctx.fillStyle = root.accent
+              ctx.fill()
+              ctx.lineWidth = Math.max(1, Style.space(3))
+              ctx.strokeStyle = root.border
+              ctx.stroke()
+            }
+            var h = root.hoveredIndex
+            if (h >= 0 && h < n && h !== p) {
+              var rad = root.centerDeg(h) * Math.PI / 180
+              var mx = cx + Math.cos(rad) * root.iconRingR
+              var my = cy + Math.sin(rad) * root.iconRingR
+              ctx.beginPath()
+              ctx.arc(mx, my, root.iconBox * 0.55, 0, Math.PI * 2)
+              ctx.fillStyle = root.selectionFill
+              ctx.fill()
+              ctx.lineWidth = Math.max(1, Style.space(2))
+              ctx.strokeStyle = root.border
+              ctx.stroke()
+            }
+          } else {
+            var p = root.pressedIndex
+            if (p >= 0 && p < n) {
+              root.traceWedge(ctx, cx, cy, p, n)
+              ctx.fillStyle = root.accent
+              ctx.fill()
+              ctx.lineWidth = Math.max(1, Style.space(3))
+              ctx.strokeStyle = root.border
+              ctx.stroke()
+            }
+            var h = root.hoveredIndex
+            if (h >= 0 && h < n && h !== p) {
+              root.traceWedge(ctx, cx, cy, h, n)
+              ctx.fillStyle = root.selectionFill
+              ctx.fill()
+              ctx.lineWidth = Math.max(1, Style.space(2))
+              ctx.strokeStyle = root.border
+              ctx.stroke()
+            }
           }
         }
       }
@@ -2167,20 +2397,26 @@ Item {
           Behavior on scale { NumberAnimation { duration: 100; easing.type: Easing.OutQuad } }
 
           // Image icon (app icons + custom image paths) or glyph icon.
+          // Both share one box: images fill it via PreserveAspectFit,
+          // glyphs ink it via the measured per-glyph size below.
+          readonly property int pictBox: Math.round(root.iconBox * 0.62)
+          readonly property string pictSrc: {
+            if (!wedgeItem.modelData) return ""
+            if (wedgeItem.modelData.kind === "app") return root.iconSourceFor(wedgeItem.modelData.appIcon)
+            return root.iconSourceFor(wedgeItem.modelData.icon)
+          }
           Image {
             visible: wedgeItem.imageIcon
             anchors.centerIn: parent
-            width: Math.round(root.iconBox * 0.62)
-            height: Math.round(root.iconBox * 0.62)
+            width: wedgeItem.pictBox
+            height: wedgeItem.pictBox
             opacity: wedgeItem.dimmed ? 0.25 : 1
             fillMode: Image.PreserveAspectFit
-            sourceSize.width: width * Screen.devicePixelRatio
-            sourceSize.height: height * Screen.devicePixelRatio
-            source: {
-              if (!wedgeItem.modelData) return ""
-              if (wedgeItem.modelData.kind === "app") return root.iconSourceFor(wedgeItem.modelData.appIcon)
-              return root.iconSourceFor(wedgeItem.modelData.icon)
-            }
+            // SVGs rasterize at 512 (see root.svgSource); anything else
+            // loads at display size.
+            sourceSize.width: root.svgSource(wedgeItem.pictSrc) ? 512 : width * Screen.devicePixelRatio
+            sourceSize.height: root.svgSource(wedgeItem.pictSrc) ? 512 : height * Screen.devicePixelRatio
+            source: wedgeItem.pictSrc
             asynchronous: true
           }
           Text {
@@ -2190,11 +2426,12 @@ Item {
             text: root.glyphFor(wedgeItem.modelData)
             color: wedgeItem.pressed ? root.contentOn(root.accent) : (wedgeItem.hovered ? root.contentOn(root.selectionFill) : root.foreground)
             opacity: wedgeItem.dimmed && !wedgeItem.hovered ? 0.25 : 1
-            font.family: (wedgeItem.modelData && wedgeItem.modelData.iconFont) || Style.fontFamily
-            font.pixelSize: root.iconBox > 72 ? Style.font.displayLarge : (root.iconBox > 60 ? Style.font.display : Style.font.iconLarge)
+            font.family: root.glyphFontFor(wedgeItem.modelData) || Style.fontFamily
+            font.pixelSize: root.glyphPixelSizeFor(wedgeItem.modelData, wedgeItem.pictBox)
           }
         }
       }
+      } // ringContent
 
       // Hub: back affordance + keyboard focus.
       Item {
@@ -2265,9 +2502,16 @@ Item {
       }
 
       Column {
+        id: hubCol
         anchors.centerIn: parent
         width: root.hubRadius * 2 - Style.space(12)
         spacing: Style.space(2)
+        // Hub content fades + settles with the ring, like island's Surface
+        // content once the morph starts (slide exaggerated to read here).
+        opacity: root.menuT
+        // Logical px so the travel scales with the theme like all other
+        // geometry (a raw constant would drift on denser/roomier themes).
+        transform: Translate { y: (1 - root.menuT) * Style.space(16) }
         Text {
           anchors.horizontalCenter: parent.horizontalCenter
           width: parent.width
@@ -2293,8 +2537,8 @@ Item {
             height: Math.round(parent.height * 0.85)
             visible: root.hubEntryIsImage()
             fillMode: Image.PreserveAspectFit
-            sourceSize.width: width * Screen.devicePixelRatio
-            sourceSize.height: height * Screen.devicePixelRatio
+            sourceSize.width: root.svgSource(root.hubEntryIconSource()) ? 512 : width * Screen.devicePixelRatio
+            sourceSize.height: root.svgSource(root.hubEntryIconSource()) ? 512 : height * Screen.devicePixelRatio
             source: root.hubEntryIconSource()
             asynchronous: true
           }
@@ -2304,8 +2548,8 @@ Item {
             textFormat: Text.PlainText
             text: root.hubEntry() ? root.glyphFor(root.hubEntry()) : ""
             color: (((root.filterText.trim() && root.bestGlobal) || root.hoveredEntry()) ? root.selectedText : root.foreground)
-            font.family: (root.hubEntry() && root.hubEntry().iconFont) || Style.fontFamily
-            font.pixelSize: Style.space(40)
+            font.family: root.glyphFontFor(root.hubEntry()) || Style.fontFamily
+            font.pixelSize: root.glyphPixelSizeFor(root.hubEntry(), Math.round(Style.space(52) * 0.85))
           }
         }
         Text {
@@ -2654,6 +2898,22 @@ Item {
               visible: root.editorMenu !== "root"
               text: "‹ Back"
               onClicked: root.editorBack()
+            }
+            Button {
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.verticalCenter: parent.verticalCenter
+              visible: root.editorMenu === "root"
+              text: "Design: " + (root.wheelDesign === "witcher3" ? "Witcher 3" : "RDR2")
+              onClicked: {
+                var nextDesign = root.wheelDesign === "witcher3" ? "rdr2" : "witcher3"
+                root.wheelDesign = nextDesign
+                // Persist into user file settings
+                var path = root.userMenuPath
+                try {
+                  // We can record or update user extension file
+                  root.applyUserFileOps([{ t: "set-design", value: nextDesign }])
+                } catch (e) {}
+              }
             }
             Button {
               anchors.right: parent.right

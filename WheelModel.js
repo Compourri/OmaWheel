@@ -477,8 +477,261 @@ function guardScript(items) {
   return guards ? guardPrelude(guards) + guards : ""
 }
 
+// Island (https://github.com/Guilhermerisu/island) points the shared user
+// menu file's stock entries at itself on setup (companion/install.sh):
+//   "apps": {"action":"omarchy-shell guilhermerisu.island apps"}, ...
+// for style.theme, style.background, apps, system, trigger.emoji,
+// learn.keybindings. Merged verbatim that flips "apps" from a provider
+// submenu into an action, so the wheel's Apps wedge launches the island
+// instead of drilling into app categories (and System loses its subtree
+// the same way). The wheel ignores those overrides in memory — the file
+// itself is left alone so the stock menu keeps whatever island intended.
+// A custom user entry that merely opens the island under its own id is
+// intentional and is kept; only the six stock ids are scrubbed.
+var ISLAND_HIJACK_IDS = [
+  "style.theme",
+  "style.background",
+  "apps",
+  "system",
+  "trigger.emoji",
+  "learn.keybindings"
+]
+
+function isIslandHijack(entry) {
+  if (!entry || !entry.id) return false
+  if (ISLAND_HIJACK_IDS.indexOf(entry.id) < 0) return false
+  return String(entry.action || "").indexOf("guilhermerisu.island") >= 0
+}
+
+function scrubIslandHijacks(defaultItems, userItems) {
+  var list = Array.isArray(userItems) ? userItems : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (isIslandHijack(list[i])) continue
+    out.push(list[i])
+  }
+  return out
+}
+
+var GLYPH_INK = {
+  '\u0001\u2022': 0.24,
+  '\u0001\u2713': 0.53,
+  '\u0001\ue383': 0.75,
+  '\u0001\ue615': 0.88,
+  '\u0001\ue627': 0.88,
+  '\u0001\ue62a': 0.88,
+  '\u0001\ue62b': 0.875,
+  '\u0001\ue62d': 0.88,
+  '\u0001\ue638': 0.875,
+  '\u0001\ue659': 0.875,
+  '\u0001\ue6ae': 0.88,
+  '\u0001\ue707': 0.74,
+  '\u0001\ue737': 0.78,
+  '\u0001\ue738': 0.78,
+  '\u0001\ue73c': 0.77,
+  '\u0001\ue73d': 0.8,
+  '\u0001\ue73f': 0.8,
+  '\u0001\ue757': 0.78,
+  '\u0001\ue768': 0.8,
+  '\u0001\ue76f': 0.8,
+  '\u0001\ue77f': 0.785,
+  '\u0001\ue781': 0.785,
+  '\u0001\ue795': 0.705,
+  '\u0001\ue7a8': 0.8,
+  '\u0001\ue7c0': 0.78,
+  '\u0001\ue7f0': 0.8,
+  '\u0001\ue84e': 0.8,
+  '\u0001\ue860': 0.8,
+  '\u0001\ue8da': 0.8,
+  '\u0001\ue8ef': 0.8,
+  '\u0001\ue999': 0.73,
+  '\u0001\uea74': 0.88,
+  '\u0001\uea78': 0.94,
+  '\u0001\uea7b': 0.88,
+  '\u0001\ueb01': 0.88,
+  '\u0001\ueb11': 0.88,
+  '\u0001\ueba2': 0.94,
+  '\u0001\ueba4': 0.88,
+  '\u0001\uebcf': 0.88,
+  '\u0001\uec12': 0.88,
+  '\u0001\uec19': 0.88,
+  '\u0001\ued0d': 0.91,
+  '\u0001\ued3e': 0.9,
+  '\u0001\uef70': 0.93,
+  '\u0001\uef94': 0.93,
+  '\u0001\uefba': 0.93,
+  '\u0001\uf001': 0.93,
+  '\u0001\uf005': 0.955,
+  '\u0001\uf011': 0.9,
+  '\u0001\uf013': 0.93,
+  '\u0001\uf021': 0.865,
+  '\u0001\uf023': 0.93,
+  '\u0001\uf030': 0.925,
+  '\u0001\uf03a': 0.895,
+  '\u0001\uf03d': 1.04,
+  '\u0001\uf03e': 0.925,
+  '\u0001\uf040': 0.93,
+  '\u0001\uf044': 0.92,
+  '\u0001\uf047': 0.93,
+  '\u0001\uf07f': 0.93,
+  '\u0001\uf0ac': 0.93,
+  '\u0001\uf0ad': 0.93,
+  '\u0001\uf0c3': 0.93,
+  '\u0001\uf0db': 0.925,
+  '\u0001\uf114': 0.925,
+  '\u0001\uf118': 0.93,
+  '\u0001\uf11b': 1.155,
+  '\u0001\uf11c': 1.04,
+  '\u0001\uf121': 1.155,
+  '\u0001\uf15c': 0.93,
+  '\u0001\uf19d': 1.155,
+  '\u0001\uf1b2': 0.925,
+  '\u0001\uf1b6': 0.9,
+  '\u0001\uf1da': 0.93,
+  '\u0001\uf1de': 0.925,
+  '\u0001\uf21f': 1.155,
+  '\u0001\uf268': 0.93,
+  '\u0001\uf269': 0.9,
+  '\u0001\uf2d0': 0.925,
+  '\u0001\uf359': 1.0,
+  '\u0001\uf405': 1.0,
+  '\u0001\uf46a': 0.88,
+  '\u0001\uf487': 0.98,
+  '\u0001\uf488': 1.0,
+  '\u0001\uf489': 1.0,
+  '\u0001\uf4b8': 1.0,
+  '\u0001\uf50e': 0.94,
+  '\u0001\uf835': 0.73,
+  '\u0001\u1f534': 0.73,
+  '\u0001\u1f7e0': 0.73,
+  '\u0001\u1f7e1': 0.73,
+  '\u0001\u1f7e2': 0.73,
+  '\u0001\uf003b': 0.67,
+  '\u0001\uf0045': 0.66,
+  '\u0001\uf004d': 0.66,
+  '\u0001\uf0054': 0.66,
+  '\u0001\uf005d': 0.66,
+  '\u0001\uf0079': 0.84,
+  '\u0001\uf009b': 0.89,
+  '\u0001\uf00af': 0.84,
+  '\u0001\uf00b5': 0.8,
+  '\u0001\uf00c9': 0.71,
+  '\u0001\uf012c': 0.73,
+  '\u0001\uf0156': 0.59,
+  '\u0001\uf015f': 1.0,
+  '\u0001\uf0176': 0.835,
+  '\u0001\uf018f': 0.92,
+  '\u0001\uf01bd': 0.82,
+  '\u0001\uf01c5': 0.84,
+  '\u0001\uf01d6': 0.75,
+  '\u0001\uf01e9': 0.835,
+  '\u0001\uf0237': 0.84,
+  '\u0001\uf0249': 0.75,
+  '\u0001\uf02ad': 0.84,
+  '\u0001\uf02af': 0.84,
+  '\u0001\uf02ca': 0.84,
+  '\u0001\uf02d1': 0.835,
+  '\u0001\uf030c': 0.835,
+  '\u0001\uf033e': 0.88,
+  '\u0001\uf0343': 0.84,
+  '\u0001\uf035c': 0.75,
+  '\u0001\uf0372': 0.8,
+  '\u0001\uf0373': 0.84,
+  '\u0001\uf0379': 0.92,
+  '\u0001\uf03d3': 0.75,
+  '\u0001\uf03d6': 0.88,
+  '\u0001\uf0425': 0.71,
+  '\u0001\uf0431': 0.88,
+  '\u0001\uf0432': 0.75,
+  '\u0001\uf0453': 0.875,
+  '\u0001\uf04b2': 0.92,
+  '\u0001\uf04c5': 0.835,
+  '\u0001\uf04c7': 0.84,
+  '\u0001\uf050e': 0.87,
+  '\u0001\uf052b': 0.75,
+  '\u0001\uf059f': 0.84,
+  '\u0001\uf05ba': 0.84,
+  '\u0001\uf066f': 0.96,
+  '\u0001\uf06a9': 0.92,
+  '\u0001\uf06c4': 0.75,
+  '\u0001\uf06e4': 1.0,
+  '\u0001\uf06e7': 1.0,
+  '\u0001\uf06f3': 0.84,
+  '\u0001\uf0709': 0.81,
+  '\u0001\uf0785': 0.84,
+  '\u0001\uf07f5': 0.84,
+  '\u0001\uf07f8': 0.835,
+  '\u0001\uf0868': 0.835,
+  '\u0001\uf0881': 0.92,
+  '\u0001\uf088c': 0.92,
+  '\u0001\uf08b9': 0.92,
+  '\u0001\uf08c0': 0.71,
+  '\u0001\uf08c7': 0.84,
+  '\u0001\uf0901': 0.75,
+  '\u0001\uf0966': 0.84,
+  '\u0001\uf09f8': 0.88,
+  '\u0001\uf0a5f': 0.75,
+  '\u0001\uf0acf': 0.835,
+  '\u0001\uf0ae2': 0.92,
+  '\u0001\uf0b4c': 0.92,
+  '\u0001\uf0b79': 0.835,
+  '\u0001\uf0bc9': 0.92,
+  '\u0001\uf0d11': 0.75,
+  '\u0001\uf0d6e': 0.835,
+  '\u0001\uf0e0c': 0.84,
+  '\u0001\uf10ac': 0.835,
+  '\u0001\uf1104': 0.92,
+  '\u0001\uf1183': 0.59,
+  '\u0001\uf11f1': 1.0,
+  '\u0001\uf14de': 0.845,
+  '\u0001\uf14df': 0.845,
+  '\u0001\uf16a1': 0.92,
+  '\u0001\uf16a4': 0.92,
+  '\u0001\uf16be': 0.95,
+  '\u0001\uf18f4': 0.835,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue900': 1.0,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue901': 0.88,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue902': 0.88,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue903': 0.88,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue904': 0.88,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue905': 0.88,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue906': 0.88,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue907': 0.88,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue908': 0.88,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue90a': 0.88,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue90b': 0.88,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue90c': 0.835,
+  '\u006f\u006d\u0061\u0072\u0063\u0068\u0079\u0001\ue90d': 0.88
+}
+
+// Glyph ink normalization: icon-font glyphs vary wildly in ink coverage
+// (measured 0.24–1.16 em across the shipped menu), while app image icons
+// are full-bleed tiles filling their box. A single font size can never fit
+// both a sprawling outline glyph and a compact mark, so each known glyph
+// carries its measured max-dimension ink ratio (ink/em, via PIL over the
+// exact font files) and the pixel size derives from the target box:
+//   pixelSize = box / inkPerEm  →  every glyph inks the same box.
+// Unknown/custom glyphs assume the median 0.88. Sizes clamp to 2.5×box so
+// degenerate marks (the "•" missing-icon fallback) stay subdued instead of
+// inflating to a full tile.
+var GLYPH_FALLBACK_INK = 0.88
+
+function glyphPixelSize(icon, iconFont, box) {
+  var key = String(iconFont || "") + "\x01" + String(icon || "")
+  var ink = GLYPH_INK[key] || GLYPH_FALLBACK_INK
+  if (!(ink > 0)) ink = GLYPH_FALLBACK_INK
+  var size = Math.round(box / ink)
+  var cap = Math.round(box * 2.5)
+  if (size > cap) size = cap
+  if (size < 1) size = 1
+  return size
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
+    islandHijackIds: ISLAND_HIJACK_IDS,
+    isIslandHijack: isIslandHijack,
+    scrubIslandHijacks: scrubIslandHijacks,
     guardReaders: GUARD_READERS,
     guardScript: guardScript,
     stripJsonc: stripJsonc,
@@ -505,6 +758,7 @@ if (typeof module !== "undefined") {
     descriptionTextMatches: descriptionTextMatches,
     matchesQuery: matchesQuery,
     searchScore: searchScore,
-    displayRow: displayRow
+    displayRow: displayRow,
+    glyphPixelSize: glyphPixelSize
   }
 }

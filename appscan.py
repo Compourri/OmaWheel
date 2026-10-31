@@ -87,33 +87,48 @@ def detect_icon_themes():
 
 
 def icon_candidate_score(theme_rank, path):
-    """Lower is better: themed over fallback, apps context over the rest,
-    scalable svg over raster, larger raster over smaller."""
+    """Lower is better: current theme over fallback, apps context over the
+    rest, then author-rendered rasters when big enough (>=256px) over
+    scalable over small rasters, larger raster over smaller.
+
+    The raster tier exists because QtSvg mangles some detailed SVGs into
+    blobs (PdfCraft's lion loses all dark detail and its clip-path) while
+    the shipped 512px PNG is correct; a 512px raster downscaled to menu
+    size is visually equal to the vector for well-formed icons too."""
     parts = path.split(os.sep)
     context = parts[-2] if len(parts) >= 2 else ""
     context_rank = ICON_CONTEXT_RANK.get(context, 9)
     size_dir = parts[-3] if len(parts) >= 3 else ""
-    size_rank = 0
     if size_dir == "scalable":
-        size_rank = -1000000
+        raster = 1000000
     else:
         m = SIZE_RE.search(size_dir)
-        if m:
-            size_rank = -max(int(m.group(1)), int(m.group(2)))
+        raster = max(int(m.group(1)), int(m.group(2))) if m else 0
     ext = os.path.splitext(path)[1].lower()
+    if ext == ".svg":
+        prefer = 1
+    elif raster >= 256:
+        prefer = 0
+    else:
+        prefer = 2
     ext_rank = 0 if ext == ".svg" else (1 if ext == ".svgz" else 2)
-    return (theme_rank, context_rank, size_rank, ext_rank)
+    return (theme_rank, context_rank, prefer, -raster, ext_rank)
 
 
 def build_icon_index(needed):
     """Map bare icon names to best absolute file. `needed` holds names as
-    written in desktop files (with or without extension)."""
+    written in desktop files (with or without extension). `-bin` suffixed
+    variants are wanted too: repackaged binaries often ship `foo-bin.png`
+    while the desktop file declares `Icon=foo`."""
     wanted = set()
     for icon in needed:
         wanted.add(icon)
         root, ext = os.path.splitext(icon)
         if ext.lower() in ICON_EXTS and root:
             wanted.add(root)
+    for icon in list(wanted):
+        if icon and not icon.endswith("-bin"):
+            wanted.add(icon + "-bin")
     index = {}
     if not wanted:
         return index
@@ -148,7 +163,11 @@ def build_icon_index(needed):
             if ext.lower() not in ICON_EXTS or stem not in wanted:
                 continue
             full = os.path.join(pixmaps, filename)
-            score = (len(themes), 9, 0, 0)
+            # Pixmap files carry no size dir: SVGs keep the scalable tier,
+            # rasters count as small (an unknown-size raster must not beat
+            # a vector on pixels alone).
+            prefer = 1 if ext.lower() == ".svg" else 2
+            score = (len(themes), 9, prefer, 0, 0)
             prev = index.get(stem)
             if prev is None or score < prev[0]:
                 index[stem] = (score, full)
@@ -157,7 +176,11 @@ def build_icon_index(needed):
 
 def resolve_icon(icon, index):
     """Absolute existing path (or ~) passes through; otherwise the index,
-    else the bare name for client-side themed lookup."""
+    else the bare name for client-side themed lookup.
+
+    Repackaged binaries (AUR *-bin) often ship `foo-bin.png` while the
+    desktop file declares `Icon=foo`, so an exact miss also tries the
+    `-bin` suffixed name before giving up (e.g. freedownloadmanager)."""
     value = (icon or "").strip()
     if not value:
         return ""
@@ -168,12 +191,18 @@ def resolve_icon(icon, index):
         stem = os.path.splitext(os.path.basename(expanded))[0]
         if stem in index:
             return index[stem]
+        if stem + "-bin" in index:
+            return index[stem + "-bin"]
         return value
     if value in index:
         return index[value]
     stem = os.path.splitext(value)[0]
     if stem in index:
         return index[stem]
+    if value + "-bin" in index:
+        return index[value + "-bin"]
+    if stem + "-bin" in index:
+        return index[stem + "-bin"]
     return value
 
 

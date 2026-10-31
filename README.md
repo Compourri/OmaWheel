@@ -165,7 +165,12 @@ rows as the last-resort backend; the primary path reads
 `uwsm-app -- gtk-launch`. Bare icon names resolve exactly like the stock
 menu: absolute paths direct, then a bash-scanned name → file index
 (verbatim port of the stock `AppLibrary` scan — covers icons Qt's themed
-lookup misses), then `Quickshell.iconPath`. Stock-hidden apps stay hidden:
+lookup misses — plus a `-bin` suffixed fallback for repackaged binaries
+whose desktop `Icon` drops the suffix), then `Quickshell.iconPath`. One
+deliberate divergence inside the index: large author PNGs (≥256px) win
+over SVGs, because QtSvg mangles some detailed SVGs into blobs
+(PdfCraft's lion loses all dark detail and its clip-path) while the
+shipped raster is correct. Stock-hidden apps stay hidden:
 `launcher.hides` plus the `hidden-entries.sh` desktop filter are honored,
 so those ids never get rows. Apps
 are grouped by XDG main category (`Games`, `Internet`, `Media`,
