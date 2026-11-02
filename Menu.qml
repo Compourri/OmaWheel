@@ -1251,6 +1251,9 @@ Item {
         root.recentEntries = root.normalizeRecents(parsed)
       } catch (e) { root.recentEntries = [] }
       if (root.rowsLoaded) { root.ensureRecentMenu(); root.rebuildRecentRows() }
+      // Older releases left this file at 0644. Lock it down the moment we
+      // see it, not only on the next launch that rewrites it.
+      root.protectRecentsFile()
     }
     onLoadFailed: { root.recentEntries = [] }
   }
@@ -1280,12 +1283,61 @@ Item {
     root.appInfoById = next
   }
 
-  function writeRecents(content) {
-    try {
-      Util.execDetached("python3 -c " + Util.shellQuote("import os; path = os.path.expanduser('~/.local/state/omarchy/omawheel-recents.json'); os.makedirs(os.path.dirname(path), exist_ok=True); open(path, 'w', encoding='utf-8').write(" + JSON.stringify(content) + "); os.chmod(path, 0o600)"))
-    } catch (e) {
-      try { recentsFile.setText(content) } catch (e2) {}
+  // Recents are written by a helper process rather than from QML: the JSON
+  // payload travels over stdin, so it never shows up in a command line
+  // (argv is readable by other local accounts through /proc), and the file
+  // is only ever created as 0600 — via a private temp file plus rename, so
+  // it is never briefly world-readable while its contents are written.
+  readonly property string recentsScript: [
+    "import os, sys, tempfile",
+    "path = " + JSON.stringify(root.recentsPath),
+    "directory = os.path.dirname(path)",
+    "os.makedirs(directory, mode=0o700, exist_ok=True)",
+    "if os.path.exists(path): os.chmod(path, 0o600)",
+    "data = sys.stdin.readline().strip()",
+    "if not data: sys.exit(0)",
+    "handle, temp = tempfile.mkstemp(dir=directory, prefix=\".omawheel-recents.\")",
+    "try:",
+    "    with os.fdopen(handle, \"w\", encoding=\"utf-8\") as stream:",
+    "        stream.write(data)",
+    "    os.replace(temp, path)",
+    "except BaseException:",
+    "    try: os.unlink(temp)",
+    "    except OSError: pass",
+    "    raise"
+  ].join("\n")
+
+  Process {
+    id: recentsWriter
+    stdinEnabled: true
+    command: ["python3", "-c", root.recentsScript]
+    // Payload handed over on the next run, one at a time. Still "" when the
+    // helper starts means a permissions-only pass with nothing to write.
+    property string pending: ""
+    onStarted: {
+      var payload = recentsWriter.pending
+      recentsWriter.pending = ""
+      // One line is the whole payload: JSON.stringify never emits a raw
+      // newline, and readline() needs no end-of-stdin from the writer.
+      recentsWriter.write(payload + "\n")
     }
+    // A write that lands mid-run waits for the exit instead of being lost.
+    onExited: { if (recentsWriter.pending !== "") recentsWriter.running = true }
+  }
+
+  // Bring a recents file left behind by an earlier release back to owner
+  // only. A queued or running write locks it down anyway, so don't stack a
+  // second pass on top of one.
+  function protectRecentsFile() {
+    if (recentsWriter.running || recentsWriter.pending !== "") return
+    recentsWriter.running = true
+  }
+
+  // Rapid launches coalesce: only the newest list is ever written, and a
+  // helper that is already running picks it up when it exits.
+  function writeRecents(content) {
+    recentsWriter.pending = content
+    if (!recentsWriter.running) recentsWriter.running = true
   }
 
   function recordRecent(kind, id) {

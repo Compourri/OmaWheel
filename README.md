@@ -40,7 +40,9 @@ like the Omarchy menu.
   is recorded (max 8, persisted in
   `~/.local/state/omarchy/omawheel-recents.json`) and duplicated into a
   top-level **Recent** wedge next to Apps. Originals keep their normal
-  spots; empty Recent hides itself.
+  spots; empty Recent hides itself. The store is written owner-only
+  (`0600`): the payload reaches a helper over stdin, never a command line,
+  and lands through a private temp file plus rename.
 - **Custom image icons.** Any `icon` that looks like a path (absolute,
   `~`, `file://`, `image://`) renders as an image instead of a glyph —
   in your `omarchy-menu.jsonc` user entries as well as app icons.
