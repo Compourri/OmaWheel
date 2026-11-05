@@ -14,11 +14,15 @@
     "quickshell"
   ],
   "kinds": [
-    "menu"
+    "menu",
+    "bar-widget"
   ],
   "replaces": [
     "omarchy.menu"
   ],
+  "barWidget": {
+    "defaultSection": "left"
+  },
   "keepLoaded": true,
   "entryPoints": {
     "menu": "Menu.qml"
