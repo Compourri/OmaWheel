@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "oma.wheel",
   "name": "OmaWheel",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "Compourri",
   "license": "MIT",
   "description": "Weapon-wheel style radial menu for Omarchy. Auto-populates from omarchy-menu.jsonc like the built-in menu.",
@@ -25,6 +25,7 @@
   },
   "keepLoaded": true,
   "entryPoints": {
-    "menu": "Menu.qml"
+    "menu": "Menu.qml",
+    "barWidget": "BarWidget.qml"
   }
 }
