@@ -18,7 +18,12 @@ function normalizeItem(id, raw) {
     parent = id.indexOf(".") >= 0 ? id.split(".").slice(0, -1).join(".") : "root"
   if (id === "root") parent = ""
 
-  var kind = value.action ? "action" : (value.target ? "link" : "menu")
+  // A provider-backed entry is a drill-in menu, even when Omarchy 4.5 also
+  // ships an `action` fallback for it (stock "apps" now carries both a
+  // provider and `omarchy-shell omarchy.dock apps`). Preferring the action
+  // made the Apps wedge launch the Omarchy dock's app grid instead of the
+  // wheel's own category ring.
+  var kind = value.provider ? "menu" : (value.action ? "action" : (value.target ? "link" : "menu"))
 
   return {
     id: id,

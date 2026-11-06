@@ -943,8 +943,14 @@ Item {
       } catch (e) {}
       var cats = []
       try {
-        if (Array.isArray(entry.categories)) cats = entry.categories
-        else if (typeof entry.categories === "string") cats = entry.categories.split(/[;,\s]+/)
+        // DesktopEntry.categories is a QStringList. QML exposes it as an
+        // array-like value, not always as a JS Array, so test the shape
+        // rather than Array.isArray alone or every app falls into "Other".
+        var rawCats = entry.categories
+        if (typeof rawCats === "string") cats = rawCats.split(/[;,\s]+/)
+        else if (rawCats && typeof rawCats.length === "number") {
+          for (var ci = 0; ci < rawCats.length; ci++) if (rawCats[ci]) cats.push(String(rawCats[ci]))
+        }
       } catch (e2) {}
       infos.push({
         appId: appId, label: root.appLibrary.entryName(entry),
