@@ -224,3 +224,11 @@ No hardcoded palette values in `Menu.qml` — grep should find none.
 
 Summon with `omarchy-shell shell summon oma.wheel '{"edit":true}'` (or right-click the wheel). The editor browses the merged menu
 and writes to your **user** file only (`~/.config/omarchy/extensions/omarchy-menu.jsonc`), preserving defaults. Stock items edited or hidden record overrides/guards (`when: false`), while custom items created in the editor can be edited or deleted. You can also switch wheel designs directly from the editor footer.
+
+## License and credits
+
+OmaWheel is MIT licensed (see `LICENSE`). It contains code adapted from
+Omarchy's built-in menu plugin (`shell/plugins/menu`), and Omarchy's
+original MIT copyright notice — Copyright (c) David Heinemeier Hansson —
+is retained alongside it in `LICENSE` and in the headers of `Menu.qml`
+and `WheelModel.js`.

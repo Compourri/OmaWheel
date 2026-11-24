@@ -19,6 +19,13 @@ import "WheelModel.js" as WheelModel
 // Summon: omarchy-shell shell summon oma.wheel '{"menu":"root"}'
 // Routes accept ids (system, setup.power) or aliases (power, settings).
 // Editor: omarchy-shell shell summon oma.wheel '{"edit":true}'
+//
+// Contains code adapted from Omarchy's built-in menu plugin
+// (shell/plugins/menu/Menu.qml, https://github.com/omacom/omarchy).
+// Omarchy is licensed under the MIT License:
+// Copyright (c) David Heinemeier Hansson
+// Omarchy's original MIT copyright and permission notice are retained
+// in the LICENSE file.
 
 Item {
   id: root

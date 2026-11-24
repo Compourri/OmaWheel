@@ -1,3 +1,12 @@
+// OmaWheel — menu data model.
+//
+// Contains code adapted from Omarchy's built-in menu plugin
+// (shell/plugins/menu/MenuModel.js, https://github.com/omacom/omarchy).
+// Omarchy is licensed under the MIT License:
+// Copyright (c) David Heinemeier Hansson
+// Omarchy's original MIT copyright and permission notice are retained
+// in the LICENSE file.
+
 function stripJsonc(raw) {
   return String(raw || "")
     .replace(/^\s*\/\/[^\n]*(\n|$)/gm, "")
